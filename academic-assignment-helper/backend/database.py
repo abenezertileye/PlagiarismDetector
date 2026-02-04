@@ -4,7 +4,7 @@ import os
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://student:secure_password@localhost:5432/academic_helper"
+    "postgresql://postgres:123456@localhost:5433/academic_helper"
 )
 
 engine = create_engine(DATABASE_URL)
