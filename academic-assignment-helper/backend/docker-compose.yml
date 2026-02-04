@@ -3,11 +3,11 @@ services:
     image: pgvector/pgvector:pg15
     container_name: academic_postgres
     ports:
-      - "5432:5432"
+      - "5433:5433"
     environment:
       POSTGRES_DB: academic_helper
-      POSTGRES_USER: student
-      POSTGRES_PASSWORD: secure_password
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
