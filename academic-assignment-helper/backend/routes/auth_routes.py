@@ -19,10 +19,11 @@ def register(student: schemas.StudentRegister, db: Session = Depends(get_db)):
 
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    hashed = auth.hash_password(student.password)
 
     new_student = models.Student(
         email=student.email,
-        password_hash=auth.hash_password(student.password),
+        password_hash=hashed,
         full_name=student.full_name,
         student_id=student.student_id
     )
@@ -31,6 +32,7 @@ def register(student: schemas.StudentRegister, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Student registered successfully"}
+
 @router.post("/login")
 def login(data: schemas.StudentLogin, db: Session = Depends(get_db)):
     student = db.query(models.Student)\
