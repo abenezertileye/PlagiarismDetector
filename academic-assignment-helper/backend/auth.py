@@ -14,7 +14,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 def hash_password(password: str):
-    return pwd_context.hash(password)
+    if not password or not isinstance(password, str):
+        raise HTTPException(status_code=400, detail="Password must be a non-empty string")
+    # truncate to 72 bytes to prevent bcrypt ValueError
+    password_bytes = password.encode("utf-8")[:72]
+    hashed = pwd_context.hash(password_bytes)
+
+    return hashed
+
 
 
 def verify_password(password, hashed):
