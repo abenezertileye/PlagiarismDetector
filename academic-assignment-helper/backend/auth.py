@@ -24,8 +24,9 @@ def hash_password(password: str):
 
 
 
-def verify_password(password, hashed):
-    return pwd_context.verify(password, hashed)
+def verify_password(password: str, hashed: str):
+    password_bytes = password.encode("utf-8")[:72]  # truncate same as hashing
+    return pwd_context.verify(password_bytes, hashed)
 
 
 def create_access_token(data: dict):
