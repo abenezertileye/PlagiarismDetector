@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, Float
 from sqlalchemy.sql import func
 from database import Base
+from sqlalchemy.dialects.postgresql import JSONB
 
 class Student(Base):
     __tablename__ = "students"
@@ -21,3 +22,16 @@ class Assignment(Base):
     filename = Column(String)
     original_text = Column(Text, nullable=True)
     uploaded_at = Column(TIMESTAMP, server_default=func.now())
+
+class AnalysisResult(Base):
+    __tablename__ = "analysis_results"
+
+    id = Column(Integer, primary_key=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id", ondelete="CASCADE"))
+    suggested_sources = Column(JSONB)
+    plagiarism_score = Column(Float)
+    flagged_sections = Column(JSONB)
+    research_suggestions = Column(Text)
+    citation_recommendations = Column(Text)
+    confidence_score = Column(Float, nullable=True)
+    analyzed_at = Column(TIMESTAMP, server_default=func.now())
