@@ -1,68 +1,147 @@
 # backend/rag_service.py
 from sentence_transformers import SentenceTransformer
 import psycopg2
-import numpy as np
+from openai import OpenAI
+import os
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import List
 
-# Load the model once
+# ----------------------------
+# Load embedding model once
+# ----------------------------
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
+# Load OpenAI API key from environment
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY not set in environment!")
 
+# ----------------------------
+# FastAPI router
+# ----------------------------
+router = APIRouter()
+
+# ----------------------------
+# Pydantic models
+# ----------------------------
+class RAGRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+class Source(BaseModel):
+    title: str
+    content: str
+
+# ----------------------------
+# Helper: DB connection
+# ----------------------------
+def get_db_connection():
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "academic_postgres"),
+            port=os.getenv("POSTGRES_PORT", 5432),
+            database=os.getenv("POSTGRES_DB", "academic_helper"),
+            user=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", "123456")
+        )
+        return conn
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database connection error: {e}")
+
+# ----------------------------
+# Helper: Embed text
+# ----------------------------
 def embed_text(text: str) -> list[float]:
-    """Generate embedding for a given text."""
-    if not text or not text.strip():
+    if not text.strip():
         raise ValueError("Text must not be empty")
+    return model.encode(text, normalize_embeddings=True).tolist()
 
-    embedding = model.encode(
-        text,
-        normalize_embeddings=True
-    )
-
-    return embedding.tolist()
-
-
-def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
-    """
-    Split a long text into chunks of approximately chunk_size words.
-    """
-    words = text.split()
-    chunks = [' '.join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-    return chunks
-
-
-def search_similar_sources(query: str, top_k: int = 5) -> list[dict]:
-    """
-    Search for the top-k most similar academic sources using pgvector.
-    Returns a list of dictionaries with id, title, content, and distance.
-    """
+# ----------------------------
+# Helper: Search similar sources
+# ----------------------------
+def search_similar_sources(query: str, top_k: int = 5) -> List[dict]:
     query_embedding = embed_text(query)
-
-    # Connect to PostgreSQL
-    conn = psycopg2.connect(
-    host="academic_postgres",
-    port=5432,
-    database="academic_helper",
-    user="postgres",
-    password="123456"
-)
-
+    conn = get_db_connection()
     cur = conn.cursor()
+    try:
+        sql = """
+        SELECT id, title, content AS content,
+               embedding <-> %s::vector AS distance
+        FROM academic_sources
+        ORDER BY embedding <-> %s::vector
+        LIMIT %s;
+        """
+        cur.execute(sql, (query_embedding, query_embedding, top_k))
+        results = cur.fetchall()
+        return [
+            {"id": r[0], "title": r[1], "content": r[2], "distance": float(r[3])}
+            for r in results
+        ]
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {e}")
+    finally:
+        cur.close()
+        conn.close()
 
-    # Perform similarity search using pgvector <-> operator
-    sql = """
-    SELECT id, title, content,
-       embedding <-> %s::vector AS distance
-    FROM academic_sources
-    ORDER BY embedding <-> %s::vector
-    LIMIT %s;
-    """
-    cur.execute(sql, (query_embedding, query_embedding, top_k))
-    results = cur.fetchall()
 
-    cur.close()
-    conn.close()
+# ----------------------------
+# Helper: Chunk large text
+# ----------------------------
+def chunk_text(text: str, max_words: int = 500) -> List[str]:
+    words = text.split()
+    return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
 
-    # Convert results to a friendly list of dicts
-    return [
-        {"id": r[0], "title": r[1], "content": r[2], "distance": float(r[3])}
-        for r in results
-    ]
+# ----------------------------
+# Helper: Generate grounded answer
+# ----------------------------
+def generate_answer(query: str, sources: List[Source]) -> str:
+    # Combine sources, chunking if needed
+    context_chunks = []
+    for s in sources:
+        for chunk in chunk_text(s.content):
+            context_chunks.append(f"{s.title}: {chunk}")
+    context_text = "\n\n".join(context_chunks)
+
+    prompt = f"""
+You are an academic assistant. Answer the question below using ONLY the sources provided.
+Do not include any information not present in the sources.
+
+Sources:
+{context_text}
+
+Question: {query}
+
+Answer:
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=300
+    )
+        return response.choices[0].message.content.strip()
+    except Exception as e:  # openai.error.OpenAIError is gone in v1
+        raise HTTPException(status_code=500, detail=f"OpenAI API error: {e}")
+
+
+# ----------------------------
+# FastAPI endpoint
+# ----------------------------
+@router.post("/answer")
+async def rag_answer(request: RAGRequest):
+    results = search_similar_sources(request.query, request.top_k)
+    if not results:
+        raise HTTPException(status_code=404, detail="No sources found")
+
+    sources = [Source(title=r["title"], content=r["content"]) for r in results]
+    answer = generate_answer(request.query, sources)
+
+    return {
+        "query": request.query,
+        "answer": answer,
+        "sources": [s.title for s in sources]
+    }
