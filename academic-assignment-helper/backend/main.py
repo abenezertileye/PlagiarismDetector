@@ -3,7 +3,7 @@ from database import engine
 import models
 from routes import auth_routes
 from routes import upload_routes
-
+from routes import sources_routes
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -12,4 +12,6 @@ app = FastAPI(title="Academic Assignment Helper")
 # routers
 app.include_router(auth_routes.router)
 app.include_router(upload_routes.router)
+app.include_router(sources_routes.router, prefix="/sources")
+
 
