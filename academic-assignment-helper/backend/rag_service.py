@@ -96,13 +96,9 @@ def chunk_text(text: str, max_words: int = 500) -> List[str]:
 # ----------------------------
 # Helper: Generate grounded answer
 # ----------------------------
-def generate_answer(query: str, sources: List[Source]) -> str:
-    # Combine sources, chunking if needed
-    context_chunks = []
-    for s in sources:
-        for chunk in chunk_text(s.content):
-            context_chunks.append(f"{s.title}: {chunk}")
-    context_text = "\n\n".join(context_chunks)
+def generate_answer(query: str, sources: list[dict]) -> str:
+    # Combine sources
+    context_text = "\n\n".join([f"{s['title']}: {s['content']}" for s in sources])
 
     prompt = f"""
 You are an academic assistant. Answer the question below using ONLY the sources provided.
@@ -117,14 +113,15 @@ Answer:
 """
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
+        response = client.responses.create(
+            model="gpt-4o",  # or "gpt-3.5-turbo" if your key allows
+            input=prompt,
             temperature=0,
-            max_tokens=300
-    )
-        return response.choices[0].message.content.strip()
-    except Exception as e:  # openai.error.OpenAIError is gone in v1
+            max_output_tokens=300
+        )
+        # Extract text from output array
+        return "".join([item["text"] for msg in response.output for item in msg["content"] if item["type"] == "output_text"]).strip()
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"OpenAI API error: {e}")
 
 
